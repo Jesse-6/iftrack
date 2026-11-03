@@ -31,8 +31,10 @@ The following are needed to compile this from source:
  
 Once one got the above properly set up, the 'build.sh' script at fastcall macro can be used to build this binary as fine as possible, by running:
 
-```> build.sh iftrack
-> mv iftrack ../```
+```
+> build.sh iftrack
+> mv iftrack ../
+```
 
 
 
