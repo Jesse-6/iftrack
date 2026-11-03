@@ -182,8 +182,8 @@ _code   Start entry     cmp         [rsp], dword 2
                         shl         ch, 3
                         not         ch
                         and         [flags], ch     ; will not feed tmpFS files if other instance owns them
-                        dprintf(STDERR_FILENO, \
-                                <"Warning: '%s' interface is already been watched by another instance.",10, \
+                        dprintf(STDERR_FILENO, <27,"[1;33m","Warning:",27,"[0m ", \
+                                "'%s' interface is already being watched by another instance.",10, \
                                 "Running without updating '%s'",10,10,0>, [rsp+256+16], full_path);
                         jmp         @1f
                 @@      getpid();
