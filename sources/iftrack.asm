@@ -463,6 +463,8 @@ _code   Start entry     cmp         [rsp], dword 2
                         test        [flags], POLL_STOP
                         jz          .poll
 
+                        emms
+
                         nop
                         nop
 
