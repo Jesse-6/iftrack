@@ -21,6 +21,9 @@ POLL_RUNNING = 2
 FLAG_LT1k    = 4
 TMPDIR_OK    = 8
 
+ST_NOT_DOWN  = 1
+ST_ACT_TX    = 2
+ST_ACT_RX    = 4
 
 
 _bss    save_tx         dq ?
@@ -68,27 +71,29 @@ _data   loop_cal        dq 0.00033294
         prefix_T:       db 'T', 0, 31
 
         header:         db 27,"[3F",27,"[2K"
-            .start:     db "Interface:", 27, "[1;38;5;157m %s", 27, "[0m", 9
-                        db "Status:", 27, "[1;%um %s ", 27, "[0m", 10, 0
+            .start:     db "Interface:", 27, "[1;38;5;157m %s", 27, "[0m  "
+                        db "Status:", 27, "[1;%um %s  ", 27, "[0m", 27, "7", 10, 0
 
         info_sent:      db 27, "[2K"
-            .start:     db "Sent:    " , 9, 27, "[38;5;87m", "%7.2Lf %sB", 27, "[0m"
+            .start:     db "Sent:     " , 27, "[38;5;87m", "%7.2Lf %sB ", 27, "[0m"
             .cp         dw 10
                         db "[%um"
             .pp         dd "%7.2"
-                        db "Lf %sbps", 27, "[92m", 9, "%s", 27, "[0m", 10, 0
+                        db "Lf %sbps", 27, "[0m", 10, 0
 
         info_received:  db 27, "[2K"
-            .start:     db "Received:" , 9, 27, "[38;5;221m", "%7.2Lf %sB", 27, "[0m"
+            .start:     db "Received: " , 27, "[38;5;221m", "%7.2Lf %sB ", 27, "[0m"
             .cp         dw 10
                         db "[%um"
             .pp         dd "%7.2"
-                        db "Lf %sbps", 27, "[91m", 9, "%s", 27, "[0m", 10, 0
+                        db "Lf %sbps", 27, "[0m", 20, 0
 
         speed_fmt:      db '    Lf %sbps', 10, 0
         total_fmt:      db '%7.2Lf %sB', 10, 0
         strnl_fmt:      db '%s', 10, 0
         fp_fmt:         db '%s/%s', 0
+        ifact_fmt:      db 27, "8", 27, "[0K", 27, "[%um", "🠝", 27, "[%um", "🠟", 27, "[0m", 27, "[3E", 0
+
 
         tmp_fallback:   db '/tmp', 0
 
@@ -102,8 +107,6 @@ _data   loop_cal        dq 0.00033294
 
         f_if_lock:      db '.if.lock', 0
 
-        arrow_up:       dd '🠝', 0
-        arrow_down:     dd '🠟', 0
 
 
 _code   Start entry     cmp         [rsp], dword 2
@@ -223,8 +226,8 @@ _code   Start entry     cmp         [rsp], dword 2
                         call        .vformat
                         dprintf(STDERR_FILENO, info_received.start, st0, rdx);
 
-                        mov         [info_sent.cp], 1B09h
-                        mov         [info_received.cp], 1B09h
+                        mov         [info_sent.cp], 1B20h
+                        mov         [info_received.cp], 1B20h
                         mov         r14d, '%7.2'
 
                         test        [flags], TMPDIR_OK
@@ -293,8 +296,8 @@ _code   Start entry     cmp         [rsp], dword 2
                         faddp
                         fld         tword [rsp+16]
                         fimul       dword [rsp+4]
-                        dprintf(STDERR_FILENO, <10,27,"[90m","Compensation: %.1Lf µs | Probe timestamp: %.9Lf ", \
-                                27,"[0m",27,"[1F",0>, st0, st1);
+                        dprintf(STDERR_FILENO, <10,27,"[90m","Compensation: %.1Lf µs",10, \
+                                "Probe timestamp: %.9Lf ",27,"[0m",27,"[2F",0>, st0, st1);
 
                         lseek(ebp, 0, SEEK_SET);
                         read(ebp, rsp, 63);
@@ -364,17 +367,16 @@ _code   Start entry     cmp         [rsp], dword 2
                         fld         tword [rsp+32]
                         movzx       ecx, byte [rbx+2]
                         mov         r11d, 90
-                        lea         r10, [nullstr]
-                        lea         r9, [arrow_up]
                         ftst
                         fstsw       ax
                         sahf
                         cmovz       ecx, r11d
-                        cmovz       r9, r10
-                        test        [save_state], 1
+                        setnz       r10b
+                        add         r10b, r10b
+                        or          [save_state], r10b
+                        test        [save_state], ST_NOT_DOWN
                         cmovz       ecx, r11d
-                        cmovz       r9, r10
-                        dprintf(STDERR_FILENO, info_sent, st1, rdx, ecx, st0, rbx, r9);
+                        dprintf(STDERR_FILENO, info_sent, st1, rdx, ecx, st0, rbx);
 
                         test        [flags], TMPDIR_OK
                         jz          @f
@@ -427,19 +429,27 @@ _code   Start entry     cmp         [rsp], dword 2
                         fld         tword [rsp+32]
                         movzx       ecx, byte [rbx+2]
                         mov         r11d, 90
-                        lea         r10, [nullstr]
-                        lea         r9, [arrow_down]
                         ftst
                         fstsw       ax
                         sahf
                         cmovz       ecx, r11d
-                        cmovz       r9, r10
-                        test        [save_state], 1
+                        setnz       r10b
+                        shl         r10b, 2
+                        or          [save_state], r10b
+                        test        [save_state], ST_NOT_DOWN
                         cmovz       ecx, r11d
-                        cmovz       r9, r10
-                        dprintf(STDERR_FILENO, info_received, st1, rdx, ecx, st0, rbx, r9);
+                        dprintf(STDERR_FILENO, info_received, st1, rdx, ecx, st0, rbx);
 
-                        test        [flags], TMPDIR_OK
+                        mov         edx, 92
+                        mov         ecx, 91
+                        mov         r11d, 90
+                        test        [save_state], ST_ACT_TX
+                        cmovz       edx, r11d
+                        test        [save_state], ST_ACT_RX
+                        cmovz       ecx, r11d
+                        dprintf(STDERR_FILENO, ifact_fmt, rdx, rcx);
+
+                @@      test        [flags], TMPDIR_OK
                         jz          @f
                         ftruncate(fd_total_rx, 0);
                         lseek(fd_total_rx, 0, SEEK_SET);
@@ -511,7 +521,7 @@ _code   Start entry     cmp         [rsp], dword 2
                         mov         [rdi-1], byte 0
                         rmdir(full_path);
 
-                @@      dprintf(STDERR_FILENO, <8,8,10,27,"[?25h",0>);
+                @@      dprintf(STDERR_FILENO, <8,8,10,27,"[?25h",27,"[0J",0>);
 
                         exit(0);
 
