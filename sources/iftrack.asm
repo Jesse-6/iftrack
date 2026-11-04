@@ -296,8 +296,8 @@ _code   Start entry     cmp         [rsp], dword 2
                         faddp
                         fld         tword [rsp+16]
                         fimul       dword [rsp+4]
-                        dprintf(STDERR_FILENO, <10,27,"[90m","Compensation: %.1Lf µs",10, \
-                                "Probe timestamp: %.9Lf ",27,"[0m",27,"[2F",0>, st0, st1);
+                        dprintf(STDERR_FILENO, <10,27,"[90m","Compensation: %.1Lf µs ",27,"[0K",10, \
+                                "Probe timestamp: %.9Lf ",27,"[0K",27,"[0m",27,"[2F",0>, st0, st1);
 
                         lseek(ebp, 0, SEEK_SET);
                         read(ebp, rsp, 63);
@@ -447,7 +447,7 @@ _code   Start entry     cmp         [rsp], dword 2
                         cmovz       edx, r11d
                         test        [save_state], ST_ACT_RX
                         cmovz       ecx, r11d
-                        dprintf(STDERR_FILENO, ifact_fmt, rdx, rcx);
+                        dprintf(STDERR_FILENO, ifact_fmt, edx, ecx);
 
                 @@      test        [flags], TMPDIR_OK
                         jz          @f

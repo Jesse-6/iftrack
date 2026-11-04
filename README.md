@@ -1,5 +1,10 @@
 # Interface live statistics tracker utility - for Linux x86-64 systems
 
+<p align="center">
+    <img src="./screenshot/sc1.png" alt="Working interface" width=100% />
+</p>
+
+
 This simple command line utility can be used to show per second simple live statistics for a given network interface, whose name is specified as its only parameter. It tracks state, total transmitted and received data and current transmit and receive bandwidth usage. It also maintains a live database with the same data for integration with other appliances. See below.
 
 ### Usage

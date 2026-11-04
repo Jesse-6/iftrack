@@ -1,4 +1,8 @@
+ ------------------------------------------------------------------------
+   Pending features:
+
  - add support for packet count statistics (to try);
+ - add 'Q' key as an alternative to quit the application;
  - add '-service' command line option to run silently, only updating tmpFS data;
    - add service entries for OpenRC, runit, s6, dinit, sysvinit and optionally, systemd;
  - add '/etc/iftrack.conf' config file with some parameters:
@@ -7,3 +11,12 @@
    - keep base 2 statistics (default) as an option too;
  - add iftrack-gui, a graphical xcb/cairo version, which also graphs speed;
  - always enhance it, keeping it and making it run as inhumanly fast as possible.
+
+ ------------------------------------------------------------------------
+   High priority fixes:
+
+ - fix end of line not being updated on 'Compensation' line; OK!
+ - add screenshot to readme.md; OK!
+ - enhance tmpFS locking mechanism between multiple instances;
+ - enhance terminal attributes to not echo type chars while running;
+
