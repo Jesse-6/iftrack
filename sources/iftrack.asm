@@ -11,6 +11,17 @@ struct  DIRENT
         .name   rb 256
 end struct&
 
+struct  TERMIOS
+        .iflag              rd 1
+        .oflag              rd 1
+        .cflag              rd 1
+        .lflag              rd 1
+        .line               rd 1
+        .cc                 rb 32
+        .ispeed             rd 1
+        .ospeed             rd 1
+end struct
+
 struct TIMESPEC
         .sec    dq ?
         .nsec   dq ?
@@ -45,9 +56,11 @@ _bss    save_tx         dq ?
 
         full_path:      rb 128
 
+        term            TERMIOS
 
 
-_data   loop_cal        dq 0.00033294
+
+_data   loop_cal        dq 0.00030811
 
         flags           db 0
 
@@ -65,10 +78,12 @@ _data   loop_cal        dq 0.00033294
         nullstr:        db 0, 0, 36
 
         bytes:          db 'B', 0
-        prefix_k:       db 'k', 0, 32
-        prefix_M:       db 'M', 0, 33
-        prefix_G:       db 'G', 0, 31
-        prefix_T:       db 'T', 0, 31
+        prefix_k:       db 'k', 0, 32   ; kilo
+        prefix_M:       db 'M', 0, 33   ; Mega
+        prefix_G:       db 'G', 0, 31   ; Giga
+        prefix_T:       db 'T', 0, 31   ; Tera
+        prefix_P:       db 'P', 0, 91   ; Peta
+        prefix_E:       db 'E', 0, 96   ; Exa
 
         header:         db 27,"[3F",27,"[2K"
             .start:     db "Interface:", 27, "[1;38;5;157m %s", 27, "[0m  "
@@ -86,13 +101,13 @@ _data   loop_cal        dq 0.00033294
             .cp         dw 10
                         db "[%um"
             .pp         dd "%7.2"
-                        db "Lf %sbps", 27, "[0m", 20, 0
+                        db "Lf %sbps", 27, "[0m", 10, 0
 
         speed_fmt:      db '    Lf %sbps', 10, 0
         total_fmt:      db '%7.2Lf %sB', 10, 0
         strnl_fmt:      db '%s', 10, 0
         fp_fmt:         db '%s/%s', 0
-        ifact_fmt:      db 27, "8", 27, "[0K", 27, "[%um", "🠝", 27, "[%um", "🠟", 27, "[0m", 27, "[3E", 0
+        ifact_fmt:      db 27, "8", 27, "[%um", "🠝", 27, "[%um", "🠟", 27, "[0m", 27, "[3E", 0
 
 
         tmp_fallback:   db '/tmp', 0
@@ -156,6 +171,11 @@ _code   Start entry     cmp         [rsp], dword 2
                         close(ebp);
                         jmp         .err_attr
                 @@      mov         r13d, eax   ; r13d = rx
+
+                        tcdrain(STDOUT_FILENO);
+                        tcgetattr(STDIN_FILENO, term);
+                        and         [term.lflag], not ECHO
+                        tcsetattr(STDIN_FILENO, TCSADRAIN, term);
 
                         snprintf(rsp, 127, "%s/iftrack", tmpdir_ptr);
                         mkdir(rsp, 0700o);
@@ -349,13 +369,13 @@ _code   Start entry     cmp         [rsp], dword 2
                         mov         [info_sent.pp], r10d
                         mov         [speed_fmt], r10d
                         mov         rbx, rdx
-                        fld         st0
                         fstp        tword [rsp+32]
 
                         test        [flags], TMPDIR_OK
                         jz          @f
                         ftruncate(fd_tx_speed, 0);
                         lseek(fd_tx_speed, 0, SEEK_SET);
+                        fld         tword [rsp+32]
                         dprintf(fd_tx_speed, speed_fmt, st0, rbx);
                         fsync(fd_tx_speed);
 
@@ -411,13 +431,13 @@ _code   Start entry     cmp         [rsp], dword 2
                         mov         [info_received.pp], r11d
                         mov         [speed_fmt], r11d
                         mov         rbx, rdx
-                        fld         st0
                         fstp        tword [rsp+32]
 
                         test        [flags], TMPDIR_OK
                         jz          @f
                         ftruncate(fd_rx_speed, 0);
                         lseek(fd_rx_speed, 0, SEEK_SET);
+                        fld         tword [rsp+32]
                         dprintf(fd_rx_speed, speed_fmt, st0, rbx);
                         fsync(fd_rx_speed);
 
@@ -523,18 +543,42 @@ _code   Start entry     cmp         [rsp], dword 2
 
                 @@      dprintf(STDERR_FILENO, <8,8,10,27,"[?25h",27,"[0J",0>);
 
+                        or          [term.lflag], ECHO
+                        tcsetattr(STDIN_FILENO, TCSAFLUSH, term);
+
                         exit(0);
 
             .vformat:   push        1024
 
-                        fstp        st4
+                        fstp        st6
                         fild        dword [rsp]
+                        fst         st5
+                        fimul       dword [rsp]
+                        fst         st4
+                        fimul       dword [rsp]
                         fst         st3
                         fimul       dword [rsp]
                         fst         st2
                         fimul       dword [rsp]
                         fst         st1
                         fimul       dword [rsp]
+
+                        fcomi       st6
+                        ja          @f
+                        lea         rdx, [prefix_E]
+                        fdivr       st0, st6
+                        stc
+                        jmp         @1f
+
+                @@      fincstp
+                        fcomi       st5
+                        ja          @f
+                        lea         rdx, [prefix_P]
+                        fdivr       st0, st5
+                        stc
+                        jmp         @1f
+
+                @@      fincstp
                         fcomi       st4
                         ja          @f
                         lea         rdx, [prefix_T]

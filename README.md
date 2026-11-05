@@ -23,8 +23,8 @@ Just remove the binary from the location you've copied previously. That's it. ;)
 
 ### Script support for gathered data
 
-This application, when running, creates and updates a tmpFS entry for the specified interface, with all processed data formatted for exhibition. So, one can run it (as a service or not), for example: 'iftrack eth0 2>/dev/null', so it maintains an entry with data from 'eth0' interface at '/tmp/iftrack/eth0' folder.
-Those files can be read by a script, or an application, and reused by them, for example, as data for dwm-like window managers status bar about that interface. Data is already formatted exactly as shown by 'iftrack' application itself.
+This application, when running, creates and updates a tmpFS entry for the specified interface, with all processed data formatted for exhibition. So, one can run it (as a service or not), for example: 'iftrack eth0 2>/dev/null', so it now runs silently, and maintains an entry with data from 'eth0' interface at '/tmp/iftrack/eth0' folder.
+Those files can be read by a script, or an application, and be reused by them, for example, as data for dwm-like window managers status bar about that interface. Data is already formatted exactly as shown by 'iftrack' application itself.
 
 ### Compiling from source
 
@@ -32,9 +32,9 @@ The following are needed to compile this from source:
 
  - [fasm2](https://github.com/tgrysztar/fasm2 "flat assembler 2") assembler;
  - [fastcall](https://github.com/Jesse-6/fastcall "C style fastcall macro toolkit - for fasm2 assember") macro kit;
- - LLD linker (optional): for smaller, less bloated executables.
+ - lld LLVM linker (optional): for smaller, less bloated executables.
  
-Once one got the above properly set up, the 'build.sh' script at fastcall macro can be used to build this binary as fine as possible, by running:
+Once one got the above properly set up, at 'sources' folder, the 'build.sh' script at fastcall macro can be used to build this binary as fine as possible, by running:
 
 ```
 > build.sh iftrack
