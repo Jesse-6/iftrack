@@ -15,13 +15,3 @@
 
  - always enhance it, keeping it and making it run as inhumanly fast as possible.
 
- ------------------------------------------------------------------------
-   High priority fixes:
-
- - fix end of line not being updated on 'Compensation' line; OK!
- - add screenshot to readme.md; OK!
- - enhance tmpFS locking mechanism between multiple instances;
- - enhance terminal attributes to not echo type chars while running; OK!
- - fix activity animation flickering; OK!
- - add petabyte and exabyte support; OK!
-

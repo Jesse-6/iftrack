@@ -27,14 +27,25 @@ struct TIMESPEC
         .nsec   dq ?
 end struct&
 
-POLL_STOP    = 1
-POLL_RUNNING = 2
-FLAG_LT1k    = 4
-TMPDIR_OK    = 8
+struct FLOCK tp:?, wh:?, st:?, ln:?, id:?
+        .type   dw tp
+        .whence dw wh
+                dd ?
+        .start  dq st
+        .len    dq ln
+        .pid    dd id
+                dd ?
+end struct
 
-ST_NOT_DOWN  = 1
-ST_ACT_TX    = 2
-ST_ACT_RX    = 4
+POLL_STOP    = 1    ; signal to stop execution
+POLL_RUNNING = 2    ; in the poll loop
+FLAG_LT1k    = 4    ; data below 1k
+TMPDIR_OK    = 8    ; path at /tmp is exclusive and available
+LOCK_U_ERR   = 16   ; lockfile unhandled error state
+
+ST_NOT_DOWN  = 1    ; interface up or unknown
+ST_ACT_TX    = 2    ; TX activity
+ST_ACT_RX    = 4    ; RX activity
 
 
 _bss    save_tx         dq ?
@@ -60,7 +71,7 @@ _bss    save_tx         dq ?
 
 
 
-_data   loop_cal        dq 0.00030811
+_data   loop_cal        dq 0.00029576
 
         flags           db 0
 
@@ -121,6 +132,8 @@ _data   loop_cal        dq 0.00030811
         f_rx_speed:     db 'rx_speed', 0
 
         f_if_lock:      db '.if.lock', 0
+
+        lock_desc       FLOCK F_WRLCK, SEEK_SET, 0, 0, 0
 
 
 
@@ -195,23 +208,44 @@ _code   Start entry     cmp         [rsp], dword 2
                         or          [flags], cl
 
                 @@      snprintf(rsp, 127, fp_fmt, full_path, f_if_lock);
-                        open(rsp, O_CREAT or O_RDWR or O_EXCL, 0644o);
+                        open(rsp, O_CREAT or O_RDWR, 0644o);
                         mov         [fd_if_lock], eax
                         test        eax, eax
                         jns         @f
                         errno();
-                        cmp         [rax], dword EEXIST
-                        sete        ch
-                        shl         ch, 3
-                        not         ch
-                        and         [flags], ch     ; will not feed tmpFS files if other instance owns them
-                        dprintf(STDERR_FILENO, <27,"[1;33m","Warning:",27,"[0m ", \
-                                "'%s' interface is already being watched by another instance.",10, \
-                                "Running without updating '%s'",10,10,0>, [rsp+256+16], full_path);
+                        mov         r14d, [rax]
+                        and         [flags], not TMPDIR_OK
+                        or          [flags], LOCK_U_ERR
                         jmp         @1f
-                @@      getpid();
+                @@      fcntl(eax, F_SETLK, &lock_desc);
+                        test        eax, eax
+                        jns         @2f
+                        errno();
+                        cmp         [rax], dword EACCES
+                        je          @f
+                        cmp         [rax], dword EAGAIN
+                        je          @f
+                        or          [flags], LOCK_U_ERR
+                        mov         r14d, [rax]
+                @@      close(fd_if_lock);
+                        mov         [fd_if_lock], -1
+                        and         [flags], not TMPDIR_OK
+                        jmp         @1f
+                @2      getpid();
                         dprintf(fd_if_lock, "%u"\n, eax);
                         fsync(fd_if_lock);
+
+                @1      test        [flags], TMPDIR_OK
+                        jnz         @1f
+                        test        [flags], LOCK_U_ERR
+                        jz          @f
+                        dprintf(STDERR_FILENO, <27,"[1;33m","Warning:",27,"[0m","Disabling ", \
+                                "'%s' statistics for this instance due to locking error: %u.", \
+                                10,10,0>, full_path, r14d);
+                        jmp         @1f
+                @@      dprintf(STDERR_FILENO, <27,"[1;33m","Warning:",27,"[0m ", \
+                                "'%s' interface already being watched by another instance.",10, \
+                                "Running without updating '%s'",10,10,0>, [rsp+256+16], full_path);
 
                 @1      read(ebp, rsp, 8);
                         mov         [rsp+rax-1], byte 0
