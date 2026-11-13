@@ -1,52 +1,4 @@
-format ELF64
-
-include 'fastcall.inc'
-include 'stdio.inc'
-
-struct  DIRENT
-        .ino    dq ?
-        .off    dq ?
-        .reclen dw ?
-        .type   db ?
-        .name   rb 256
-end struct&
-
-struct  TERMIOS
-        .iflag              rd 1
-        .oflag              rd 1
-        .cflag              rd 1
-        .lflag              rd 1
-        .line               rd 1
-        .cc                 rb 32
-        .ispeed             rd 1
-        .ospeed             rd 1
-end struct
-
-struct TIMESPEC
-        .sec    dq ?
-        .nsec   dq ?
-end struct&
-
-struct FLOCK tp:?, wh:?, st:?, ln:?, id:?
-        .type   dw tp
-        .whence dw wh
-                dd ?
-        .start  dq st
-        .len    dq ln
-        .pid    dd id
-                dd ?
-end struct
-
-POLL_STOP    = 1    ; signal to stop execution
-POLL_RUNNING = 2    ; in the poll loop
-FLAG_LT1k    = 4    ; data below 1k
-TMPDIR_OK    = 8    ; path at /tmp is exclusive and available
-LOCK_U_ERR   = 16   ; lockfile unhandled error state
-
-ST_NOT_DOWN  = 1    ; interface up or unknown
-ST_ACT_TX    = 2    ; TX activity
-ST_ACT_RX    = 4    ; RX activity
-
+include 'iftrack.inc'
 
 _bss    save_tx         dq ?
         save_rx         dq ?
@@ -71,7 +23,7 @@ _bss    save_tx         dq ?
 
 
 
-_data   loop_cal        dq 0.00029576
+_data   loop_cal        dq 0.00010138
 
         flags           db 0
 
@@ -162,6 +114,9 @@ _code   Start entry     cmp         [rsp], dword 2
 
                         sub         rsp, 256
 
+                        call        .devcheck
+                        jc          .err_open
+
                         snprintf(rsp, 255, net_path, [rsp+256+16], oper_file, nullstr);
                         open(rsp, O_RDONLY, .);
                         test        eax, eax
@@ -217,7 +172,7 @@ _code   Start entry     cmp         [rsp], dword 2
                         and         [flags], not TMPDIR_OK
                         or          [flags], LOCK_U_ERR
                         jmp         @1f
-                @@      fcntl(eax, F_SETLK, &lock_desc);
+                @@      fcntl(eax, F_SETLK, lock_desc);
                         test        eax, eax
                         jns         @2f
                         errno();
@@ -338,7 +293,10 @@ _code   Start entry     cmp         [rsp], dword 2
                         xor         [rsp+25], byte 1100b
                         fldcw       [rsp+24]
 
-                        nanosleep(rsp, rsp);
+                        mov         rdi, rsp
+                        mov         rsi, rsp
+                        mov         eax, 35
+                        syscall
                         lea         rsp, [rsp+16]
                         test        eax, eax
                         js          .endp
@@ -355,7 +313,16 @@ _code   Start entry     cmp         [rsp], dword 2
 
                         lseek(ebp, 0, SEEK_SET);
                         read(ebp, rsp, 63);
-                        mov         [rsp+rax-1], byte 0
+                        test        rax, rax
+                        jns         @f
+                        call        .devcheck
+                        jnc         @1f
+            .endm:      emms
+                        dprintf(STDERR_FILENO, <27,"[0K",10,"Device '%s' disappeared.",0>, [rsp+256+16]);
+                        jmp         .endp
+                @1      mov         [rsp], dword '??'
+                        mov         eax, 4
+                @@      mov         [rsp+rax-1], byte 0
                         mov         ecx, 31
                         mov         r11d, 33
                         mov         r10d, 32
@@ -380,7 +347,12 @@ _code   Start entry     cmp         [rsp], dword 2
 
                 @@      lseek(r12d, 0, SEEK_SET);
                         read(r12d, rsp, 63);
-                        mov         [rsp+rax-1], byte 0
+                        test        rax, rax
+                        jns         @f
+                        call        .devcheck
+                        jc          .endm
+                        jmp         @b
+                @@      mov         [rsp+rax-1], byte 0
 
                         test        [flags], TMPDIR_OK
                         jz          @f
@@ -442,7 +414,12 @@ _code   Start entry     cmp         [rsp], dword 2
 
                 @@      lseek(r13d, 0, SEEK_SET);
                         read(r13d, rsp, 63);
-                        mov         [rsp+rax-1], byte 0
+                        test        rax, rax
+                        jns         @f
+                        call        .devcheck
+                        jc          .endm
+                        jmp         @b
+                @@      mov         [rsp+rax-1], byte 0
 
                         test        [flags], TMPDIR_OK
                         jz          @f
@@ -575,7 +552,7 @@ _code   Start entry     cmp         [rsp], dword 2
                         mov         [rdi-1], byte 0
                         rmdir(full_path);
 
-                @@      dprintf(STDERR_FILENO, <8,8,10,27,"[?25h",27,"[0J",0>);
+                @@      dprintf(STDERR_FILENO, <10,27,"[?25h",27,"[0J",0>);
 
                         or          [term.lflag], ECHO
                         tcsetattr(STDIN_FILENO, TCSAFLUSH, term);
@@ -652,6 +629,37 @@ _code   Start entry     cmp         [rsp], dword 2
                         ffree       st7
                         ret
 
+            .devcheck:  sub         rsp, 280
+
+                        pxor        xmm5, xmm5
+                        movdqu      xmm4, xword [net_path]
+                        movdqa      [rsp], xmm4
+                        mov         rsi, [rsp+256+16+288]
+                        lea         rdi, [rsp+15]
+                        mov         ecx, 16
+
+                @@      dec         ecx
+                        js          @f
+                        movdqu      xmm2, [rsi]
+                        movdqu      [rdi], xmm2
+                        pcmpeqb     xmm2, xmm5
+                        pmovmskb    edx, xmm2
+                        add         rsi, 16
+                        add         rdi, 16
+                        test        edx, edx
+                        jz          @b
+
+                        open(rsp, O_RDONLY, .);
+                        test        eax, eax
+                        js          @f
+                        close(eax);
+                        lea         rsp, [rsp+280]
+                        clc
+                        ret
+
+                @@      lea         rsp, [rsp+280]
+                        stc
+                        ret
 
             .help:      dprintf(STDERR_FILENO, help_text, [rsp+8]);
 
