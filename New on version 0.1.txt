@@ -1,0 +1,9 @@
+      New on version 0.1:
+
+ -  Support for base 10 metric data exhibition, configurable;
+ -  Precision compensation value can now be set by the user;
+ -  tmpFS statistics can be enabled/disabled by the user;
+ -  Debug string is now default disabled: can be enabled by the user;
+ -  Environment variables configuration support;
+ -  Make activity animation VTY compatible, as well as GUI compatible.
+

@@ -23,11 +23,11 @@ _bss    save_tx         dq ?
 
 
 
-_data   loop_cal        dq 0.00010138
+_data   loop_cal        dq 0.000'098'46 ; Default: IFTRACK_FIXED_BIAS=0.09846ms
 
         flags           db 0
 
-        help_text:      db 27, "[1m",'Simple interface live tracker command line utility. Version 0.0.'
+        help_text:      db 27, "[1m",'Simple interface live tracker command line utility. Version 0.1.'
                         file 'iftrack.subver'
                         db '.', 10, 27, "[0m", 'Made in assembly language with fasm2!', 10
                         db 'Usage:', 10, 10, 27, "[1m ", " %s ", 27, "[0m", "interface", 10, 10, 0
@@ -47,30 +47,32 @@ _data   loop_cal        dq 0.00010138
         prefix_T:       db 'T', 0, 31   ; Tera
         prefix_P:       db 'P', 0, 91   ; Peta
         prefix_E:       db 'E', 0, 96   ; Exa
+        prefix_i:       db 'i', 0       ; For humanized (prefix-base 1000) counters
+
 
         header:         db 27,"[3F",27,"[2K"
             .start:     db "Interface:", 27, "[1;38;5;157m %s", 27, "[0m  "
                         db "Status:", 27, "[1;%um %s  ", 27, "[0m", 27, "7", 10, 0
 
         info_sent:      db 27, "[2K"
-            .start:     db "Sent:     " , 27, "[38;5;87m", "%7.2Lf %sB ", 27, "[0m"
+            .start:     db "Sent:     " , 27, "[38;5;87m", "%7.2Lf %s%sB ", 27, "[0m"
             .cp         dw 10
                         db "[%um"
             .pp         dd "%7.2"
-                        db "Lf %sbps", 27, "[0m", 10, 0
+                        db "Lf %s%sbps", 27, "[0m", 10, 0
 
         info_received:  db 27, "[2K"
-            .start:     db "Received: " , 27, "[38;5;221m", "%7.2Lf %sB ", 27, "[0m"
+            .start:     db "Received: " , 27, "[38;5;221m", "%7.2Lf %s%sB ", 27, "[0m"
             .cp         dw 10
                         db "[%um"
             .pp         dd "%7.2"
-                        db "Lf %sbps", 27, "[0m", 10, 0
+                        db "Lf %s%sbps", 27, "[0m", 10, 0
 
         speed_fmt:      db '    Lf %sbps', 10, 0
         total_fmt:      db '%7.2Lf %sB', 10, 0
         strnl_fmt:      db '%s', 10, 0
         fp_fmt:         db '%s/%s', 0
-        ifact_fmt:      db 27, "8", 27, "[%um", "🠝", 27, "[%um", "🠟", 27, "[0m", 27, "[3E", 0
+        ifact_fmt:      db 27, "8", 27, "[%um", "↑", 27, "[%um", "↓", 27, "[0m", 27, "[3E", 0 ; ↑ ↓  🠝 🠟
 
 
         tmp_fallback:   db '/tmp', 0
@@ -145,7 +147,86 @@ _code   Start entry     cmp         [rsp], dword 2
                         and         [term.lflag], not ECHO
                         tcsetattr(STDIN_FILENO, TCSADRAIN, term);
 
-                        snprintf(rsp, 127, "%s/iftrack", tmpdir_ptr);
+                        getenv("IFTRACK_DEBUG_ENABLE");
+                        test        rax, rax
+                        jz          @1f
+                        cmp         [rax], word '0'
+                        jne         @f
+                        and         [flags], not DEBUG_ENABLE
+                        jmp         @1f
+                @@      cmp         [rax], word '1'
+                        jne         @1f
+                        or          [flags], DEBUG_ENABLE
+
+                @1      getenv("IFTRACK_TMPFS_TRACK");
+                        test        rax, rax
+                        jz          @1f
+                        cmp         [rax], word '0'
+                        jne         @f
+                        or          [flags], 1                  ; reuse 1st flag to skip tmpFS setup ¹
+                        jmp         @1f
+                @@      cmp         [rax], word '1'
+                        jne         @1f
+                        or          [flags], TMPDIR_OK
+
+                @1      getenv("IFTRACK_PREFIX_BASE");
+                        test        rax, rax
+                        jz          @1f
+                        mov         r9, 'hybrid'
+                        mov         r10, '1000'
+                        mov         r11, '1024'
+                        mov         rdx, [rax]
+                        mov         rcx, 0_0000_00FF_FFFF_FFFFh
+                        mov         rax, 0_00FF_FFFF_FFFF_FFFFh
+                        mov         r8,  0_0000_2020_2020_2020h
+                        and         rcx, rdx
+                        and         rax, rdx
+                        cmp         rax, r9
+                        jne         @f
+                        or          [flags], HYBRID_SCALE
+                        jmp         @1f
+                @@      xor         r9, r8
+                        cmp         rax, r9
+                        jne         @f
+                        or          [flags], HYBRID_SCALE
+                        jmp         @1f
+                @@      cmp         rcx, r10
+                        jne         @f
+                        or          [flags], HUMAN_SCALE
+                        jmp         @1f
+                @@      cmp         rcx, r11
+                        jne         @1f
+                        and         [flags], not HUMAN_SCALE
+
+                @1      getenv("IFTRACK_FIXED_BIAS");      ; should be in ms!
+                        test        rax, rax
+                        jz          @1f
+                        mov         rdi, rax
+                        mov         rsi, rax
+                        mov         ecx, 36                 ; float number + 'ms' string length should be < 36
+                        xor         al, al
+                        repne       scasb
+                        jne         @1f
+                        lea         rbx, [rdi-3]
+                        cmp         [rbx], word 'ms'        ; value should be 'N.NNNNms'
+                        jne         @1f
+                        mov         rdi, rsp
+                        xchg        rsi, rdi
+                        strtold(rdi, rsi);
+                        cmp         rbx, [rsp]              ; error checking
+                        jne         @1f
+                        mov         [rsp-4], dword 1'000
+                        fidiv       dword [rsp-4]
+                        fstp        [loop_cal]
+
+                @1      emms
+
+                        btr         dword [flags], 0        ; ¹ :: also clear flag 0 for future use
+                        jnc         @f
+                        test        [flags], TMPDIR_OK
+                        jz          @3f
+
+                @@      snprintf(rsp, 127, "%s/iftrack", tmpdir_ptr);
                         mkdir(rsp, 0700o);
                         snprintf(full_path, 127, "%s/%s", rsp, [rsp+256+16]);
                         mkdir(full_path, 0700o);
@@ -191,18 +272,18 @@ _code   Start entry     cmp         [rsp], dword 2
                         fsync(fd_if_lock);
 
                 @1      test        [flags], TMPDIR_OK
-                        jnz         @1f
+                        jnz         @3f
                         test        [flags], LOCK_U_ERR
                         jz          @f
                         dprintf(STDERR_FILENO, <27,"[1;33m","Warning:",27,"[0m","Disabling ", \
                                 "'%s' statistics for this instance due to locking error: %u.", \
                                 10,10,0>, full_path, r14d);
-                        jmp         @1f
+                        jmp         @3f
                 @@      dprintf(STDERR_FILENO, <27,"[1;33m","Warning:",27,"[0m ", \
                                 "'%s' interface already being watched by another instance.",10, \
                                 "Running without updating '%s'",10,10,0>, [rsp+256+16], full_path);
 
-                @1      read(ebp, rsp, 8);
+                @3      read(ebp, rsp, 8);
                         mov         [rsp+rax-1], byte 0
                         mov         ecx, 31
                         mov         r11d, 33
@@ -226,14 +307,26 @@ _code   Start entry     cmp         [rsp], dword 2
                         fst         st1
                         fistp       [save_tx]
                         call        .vformat
-                        dprintf(STDERR_FILENO, info_sent.start, st0, rdx);
+                        lea         rcx, [nullstr]
+                        lea         r11, [prefix_i]
+                        test        [flags], FLAG_LT1k
+                        cmovnz      r11, rcx
+                        test        [flags], HUMAN_SCALE
+                        cmovnz      rcx, r11
+                        dprintf(STDERR_FILENO, info_sent.start, st0, rdx, rcx);
                         read(r13d, rsp, 63);
                         mov         [rsp+rax-1], byte 0
                         strtold(rsp, NULL);
                         fst         st1
                         fistp       [save_rx]
                         call        .vformat
-                        dprintf(STDERR_FILENO, info_received.start, st0, rdx);
+                        lea         rcx, [nullstr]
+                        lea         r10, [prefix_i]
+                        test        [flags], FLAG_LT1k
+                        cmovnz      r10, rcx
+                        test        [flags], HUMAN_SCALE
+                        cmovnz      rcx, r10
+                        dprintf(STDERR_FILENO, info_received.start, st0, rdx, rcx);
 
                         mov         [info_sent.cp], 1B20h
                         mov         [info_received.cp], 1B20h
@@ -302,6 +395,10 @@ _code   Start entry     cmp         [rsp], dword 2
                         js          .endp
 
                         clock_gettime(CLOCK_REALTIME, rsp+240);
+
+                        test        [flags], DEBUG_ENABLE
+                        jz          @f
+
                         fild        qword [rsp+240]
                         fild        qword [rsp+248]
                         fidiv       dword [rsp]
@@ -311,7 +408,7 @@ _code   Start entry     cmp         [rsp], dword 2
                         dprintf(STDERR_FILENO, <10,27,"[90m","Compensation: %.1Lf µs ",27,"[0K",10, \
                                 "Probe timestamp: %.9Lf ",27,"[0K",27,"[0m",27,"[2F",0>, st0, st1);
 
-                        lseek(ebp, 0, SEEK_SET);
+                @@      lseek(ebp, 0, SEEK_SET);
                         read(ebp, rsp, 63);
                         test        rax, rax
                         jns         @f
@@ -369,13 +466,22 @@ _code   Start entry     cmp         [rsp], dword 2
                         fistp       [save_tx]
                         mov         [rsp], dword 8
                         fimul       dword [rsp]
-                        call        .vformat
+                        test        [flags], HYBRID_SCALE
+                        jz          @f
+                        or          [flags], HUMAN_SCALE
+                @@      call        .vformat
                         mov         r10d, '%4.0'
                         cmovc       r10d, r14d
                         mov         [info_sent.pp], r10d
                         mov         [speed_fmt], r10d
                         mov         rbx, rdx
                         fstp        tword [rsp+32]
+
+                        test        [flags], FLAG_LT1k
+                        setnz       ch
+                        shl         ch, 3
+                        and         [save_state], not ST_SS_LT1k
+                        or          [save_state], ch
 
                         test        [flags], TMPDIR_OK
                         jz          @f
@@ -386,23 +492,43 @@ _code   Start entry     cmp         [rsp], dword 2
                         fsync(fd_tx_speed);
 
                 @@      fild        [save_tx]
-                        call        .vformat
+                        lea         rcx, [nullstr]
+                        lea         r9, [nullstr]
+                        test        [flags], HYBRID_SCALE
+                        jz          @f
+                        and         [flags], not HUMAN_SCALE
+                        jmp         @1f
+                @@      lea         rcx, [prefix_i]
+                        test        [flags], HUMAN_SCALE
+                        cmovz       rcx, r9
+                        cmp         [save_tx], 1024
+                        cmovb       rcx, r9
+                @1      call        .vformat
                         mov         r15, rdx
                         fld         st0
                         fstp        tword [rsp+48]
                         fld         tword [rsp+32]
-                        movzx       ecx, byte [rbx+2]
+                        movzx       r8d, byte [rbx+2]
                         mov         r11d, 90
                         ftst
                         fstsw       ax
                         sahf
-                        cmovz       ecx, r11d
+                        cmovz       r8d, r11d
                         setnz       r10b
                         add         r10b, r10b
                         or          [save_state], r10b
                         test        [save_state], ST_NOT_DOWN
-                        cmovz       ecx, r11d
-                        dprintf(STDERR_FILENO, info_sent, st1, rdx, ecx, st0, rbx);
+                        cmovz       r8d, r11d
+                        lea         rax, [prefix_i]
+                        lea         rsi, [nullstr]
+                        test        [flags], HYBRID_SCALE
+                        cmovnz      r9, rax
+                        jnz         @f
+                        test        [flags], HUMAN_SCALE
+                        cmovnz      r9, rax
+                @@      test        [save_state], ST_SS_LT1k
+                        cmovnz      r9, rsi
+                        dprintf(STDERR_FILENO, info_sent, st1, rdx, rcx, r8d, st0, rbx, r9);
 
                         test        [flags], TMPDIR_OK
                         jz          @f
@@ -436,13 +562,22 @@ _code   Start entry     cmp         [rsp], dword 2
                         fistp       [save_rx]
                         mov         [rsp], dword 8
                         fimul       dword [rsp]
-                        call        .vformat
+                        test        [flags], HYBRID_SCALE
+                        jz          @f
+                        or          [flags], HUMAN_SCALE
+                @@      call        .vformat
                         mov         r11d, '%4.0'
                         cmovc       r11d, r14d
                         mov         [info_received.pp], r11d
                         mov         [speed_fmt], r11d
                         mov         rbx, rdx
                         fstp        tword [rsp+32]
+
+                        test        [flags], FLAG_LT1k
+                        setnz       ch
+                        shl         ch, 3
+                        and         [save_state], not ST_SS_LT1k
+                        or          [save_state], ch
 
                         test        [flags], TMPDIR_OK
                         jz          @f
@@ -453,23 +588,43 @@ _code   Start entry     cmp         [rsp], dword 2
                         fsync(fd_rx_speed);
 
                 @@      fild        [save_rx]
-                        call        .vformat
+                        lea         rcx, [nullstr]
+                        lea         r9, [nullstr]
+                        test        [flags], HYBRID_SCALE
+                        jz          @f
+                        and         [flags], not HUMAN_SCALE
+                        jmp         @1f
+                @@      lea         rcx, [prefix_i]
+                        test        [flags], HUMAN_SCALE
+                        cmovz       rcx, r9
+                        cmp         [save_rx], 1024
+                        cmovb       rcx, r9
+                @1      call        .vformat
                         mov         r15, rdx
                         fld         st0
                         fstp        tword [rsp+48]
                         fld         tword [rsp+32]
-                        movzx       ecx, byte [rbx+2]
+                        movzx       r8d, byte [rbx+2]
                         mov         r11d, 90
                         ftst
                         fstsw       ax
                         sahf
-                        cmovz       ecx, r11d
+                        cmovz       r8d, r11d
                         setnz       r10b
                         shl         r10b, 2
                         or          [save_state], r10b
                         test        [save_state], ST_NOT_DOWN
-                        cmovz       ecx, r11d
-                        dprintf(STDERR_FILENO, info_received, st1, rdx, ecx, st0, rbx);
+                        cmovz       r8d, r11d
+                        lea         rax, [prefix_i]
+                        lea         rsi, [nullstr]
+                        test        [flags], HYBRID_SCALE
+                        cmovnz      r9, rax
+                        jnz         @f
+                        test        [flags], HUMAN_SCALE
+                        cmovnz      r9, rax
+                @@      test        [save_state], ST_SS_LT1k
+                        cmovnz      r9, rsi
+                        dprintf(STDERR_FILENO, info_received, st1, rdx, rcx, r8d, st0, rbx, r9);
 
                         mov         edx, 92
                         mov         ecx, 91
@@ -559,7 +714,13 @@ _code   Start entry     cmp         [rsp], dword 2
 
                         exit(0);
 
-            .vformat:   push        1024
+            .vformat:   mov         eax, 1024
+                        mov         r8d, 1000
+                        test        [flags], HUMAN_SCALE
+                        cmovnz      eax, r8d
+                        push        rax
+
+                        and         [flags], not FLAG_LT1k
 
                         fstp        st6
                         fild        dword [rsp]
@@ -623,6 +784,7 @@ _code   Start entry     cmp         [rsp], dword 2
 
                 @@      fincstp
                         lea         rdx, [nullstr]
+                        or          [flags], FLAG_LT1k
                         clc
 
                 @1      lea         rsp, [rsp+8]
